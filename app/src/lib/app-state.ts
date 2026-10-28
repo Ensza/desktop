@@ -15,6 +15,11 @@ import { Account } from '../models/account'
 import { CommitIdentity } from '../models/commit-identity'
 import { IDiff, ImageDiffType } from '../models/diff'
 import { Repository, ILocalRepositoryState } from '../models/repository'
+import {
+  IRepositoryGroup,
+  RepositoryGroupAssignments,
+} from '../models/repository-group'
+import { RepositorySyncStep } from '../models/repository-sync'
 import { Branch, IAheadBehind } from '../models/branch'
 import { Tip } from '../models/tip'
 import { Commit } from '../models/commit'
@@ -101,6 +106,24 @@ export interface IAppState {
    * List of IDs of the most recently opened repositories (most recent first)
    */
   readonly recentRepositories: ReadonlyArray<number>
+
+  /**
+   * The custom repository groups created by the user, in creation order.
+   */
+  readonly repositoryGroups: ReadonlyArray<IRepositoryGroup>
+
+  /**
+   * A map of repository ids to the id of the custom group the repository has
+   * been placed in.
+   */
+  readonly repositoryGroupAssignments: RepositoryGroupAssignments
+
+  /**
+   * A map of repository ids to the step of a group-wide update the repository
+   * is currently going through. Repositories which aren't being updated are
+   * not present in the map.
+   */
+  readonly repositorySyncSteps: ReadonlyMap<number, RepositorySyncStep>
 
   /**
    * A cache of the latest repository state values, keyed by the repository id

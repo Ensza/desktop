@@ -1,0 +1,41 @@
+@import '../mixins';
+
+/**
+ * The list of dropped folders in the "add repositories as a group" dialog.
+ */
+.add-repositories-as-group-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin: var(--spacing) 0;
+
+  li {
+    @include ellipsis;
+  }
+}
+
+/**
+ * Shown while the dropped folders are being added to the repository list.
+ */
+.add-repositories-as-group-progress {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary-color);
+
+  .octicon {
+    flex-shrink: 0;
+    margin-right: var(--spacing-half);
+  }
+}
+
+.add-repositories-as-group-spinner {
+  animation: add-repositories-as-group-spin 1s linear infinite;
+}
+
+@keyframes add-repositories-as-group-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

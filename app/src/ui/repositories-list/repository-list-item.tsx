@@ -12,6 +12,12 @@ import { createObservableRef } from '../lib/observable-ref'
 import { Tooltip } from '../lib/tooltip'
 import { enableAccessibleListToolTips } from '../../lib/feature-flag'
 import { TooltippedContent } from '../lib/tooltipped-content'
+import { Checkbox, CheckboxValue } from '../lib/checkbox'
+import {
+  getRepositorySyncStepDescription,
+  getRepositorySyncStepLabel,
+  RepositorySyncStep,
+} from '../../models/repository-sync'
 
 interface IRepositoryListItemProps {
   readonly repository: Repositoryish
@@ -27,6 +33,21 @@ interface IRepositoryListItemProps {
 
   /** Number of uncommitted changes */
   readonly changedFilesCount: number
+
+  /** Whether the repository is checked for a bulk action. */
+  readonly checked: boolean
+
+  /** Whether any repository in the list is checked for a bulk action. */
+  readonly selectionActive: boolean
+
+  /** Called when the user toggles the checkbox for this repository. */
+  readonly onToggleChecked: (repository: Repositoryish) => void
+
+  /**
+   * The step of a group-wide update this repository is currently going through,
+   * or null if it isn't being updated.
+   */
+  readonly syncStep: RepositorySyncStep | null
 }
 
 /** A repository item. */
@@ -45,6 +66,10 @@ export class RepositoryListItem extends React.Component<
     const alias: string | null =
       repository instanceof Repository ? repository.alias : null
 
+    // Only repositories which exist in the app can be part of a group (and
+    // therefore selected), repositories which are still cloning cannot.
+    const selectable = repository instanceof Repository
+
     let prefix: string | null = null
     if (this.props.needsDisambiguation && gitHubRepo) {
       prefix = `${gitHubRepo.owner.login}/`
@@ -55,13 +80,33 @@ export class RepositoryListItem extends React.Component<
     })
 
     return (
-      <div className="repository-list-item" ref={this.listItemRef}>
+      <div
+        className={classNames('repository-list-item', {
+          'selection-active': this.props.selectionActive,
+        })}
+        ref={this.listItemRef}
+      >
         <Tooltip
           target={this.listItemRef}
           disabled={enableAccessibleListToolTips()}
         >
           {this.renderTooltip()}
         </Tooltip>
+
+        <div className="repository-list-item-checkbox">
+          <Checkbox
+            value={this.props.checked ? CheckboxValue.On : CheckboxValue.Off}
+            onChange={this.onCheckboxChange}
+            onClick={this.onCheckboxMouseInteraction}
+            onMouseDown={this.onCheckboxMouseInteraction}
+            disabled={!selectable}
+            label={
+              <span className="sr-only">{`Select ${
+                alias ?? repository.name
+              }`}</span>
+            }
+          />
+        </div>
 
         <Octicon
           className="icon-for-repository"
@@ -77,10 +122,12 @@ export class RepositoryListItem extends React.Component<
         </div>
 
         {repository instanceof Repository &&
-          renderRepoIndicators({
-            aheadBehind: this.props.aheadBehind,
-            hasChanges: hasChanges,
-          })}
+          (this.props.syncStep !== null
+            ? renderSyncIndicator(this.props.syncStep)
+            : renderRepoIndicators({
+                aheadBehind: this.props.aheadBehind,
+                hasChanges: hasChanges,
+              }))}
       </div>
     )
   }
@@ -102,6 +149,18 @@ export class RepositoryListItem extends React.Component<
     )
   }
 
+  private onCheckboxMouseInteraction = (
+    event: React.MouseEvent<HTMLInputElement>
+  ) => {
+    // Toggling a checkbox should never select/open the repository, so we stop
+    // both the press and the click from reaching the list item.
+    event.stopPropagation()
+  }
+
+  private onCheckboxChange = () => {
+    this.props.onToggleChecked(this.props.repository)
+  }
+
   public shouldComponentUpdate(nextProps: IRepositoryListItemProps): boolean {
     if (
       nextProps.repository instanceof Repository &&
@@ -109,12 +168,31 @@ export class RepositoryListItem extends React.Component<
     ) {
       return (
         nextProps.repository.id !== this.props.repository.id ||
-        nextProps.matches !== this.props.matches
+        nextProps.matches !== this.props.matches ||
+        nextProps.checked !== this.props.checked ||
+        nextProps.selectionActive !== this.props.selectionActive ||
+        nextProps.syncStep !== this.props.syncStep
       )
     } else {
       return true
     }
   }
+}
+
+const renderSyncIndicator = (step: RepositorySyncStep) => {
+  return (
+    <TooltippedContent
+      className="repository-sync-state"
+      tagName="div"
+      tooltip={getRepositorySyncStepDescription(step)}
+      disabled={enableAccessibleListToolTips()}
+    >
+      <Octicon symbol={octicons.sync} className="repository-sync-spinning" />
+      <span className="repository-sync-state-label">
+        {getRepositorySyncStepLabel(step)}
+      </span>
+    </TooltippedContent>
+  )
 }
 
 const renderRepoIndicators: React.FunctionComponent<{

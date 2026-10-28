@@ -1,4 +1,5 @@
 import * as React from 'react'
+import classNames from 'classnames'
 
 import { commitGrammar, RepositoryListItem } from './repository-list-item'
 import {
@@ -11,6 +12,11 @@ import {
 import { IFilterListGroup } from '../lib/filter-list'
 import { IMatches } from '../../lib/fuzzy-find'
 import { ILocalRepositoryState, Repository } from '../../models/repository'
+import {
+  IRepositoryGroup,
+  RepositoryGroupAssignments,
+} from '../../models/repository-group'
+import { RepositorySyncStep } from '../../models/repository-sync'
 import { Dispatcher } from '../dispatcher'
 import { Button } from '../lib/button'
 import { Octicon } from '../octicons'
@@ -34,6 +40,18 @@ interface IRepositoriesListProps {
   readonly selectedRepository: Repositoryish | null
   readonly repositories: ReadonlyArray<Repositoryish>
   readonly recentRepositories: ReadonlyArray<number>
+
+  /** The custom repository groups created by the user, in display order. */
+  readonly repositoryGroups: ReadonlyArray<IRepositoryGroup>
+
+  /** The group each repository belongs to, keyed by repository id. */
+  readonly repositoryGroupAssignments: RepositoryGroupAssignments
+
+  /**
+   * The step of a group-wide update each repository is currently going
+   * through, keyed by repository id.
+   */
+  readonly repositorySyncSteps: ReadonlyMap<number, RepositorySyncStep>
 
   /** A cache of the latest repository state values, keyed by the repository id */
   readonly localRepositoryStateLookup: ReadonlyMap<
@@ -80,9 +98,34 @@ interface IRepositoriesListProps {
 interface IRepositoriesListState {
   readonly newRepositoryMenuExpanded: boolean
   readonly selectedItem: IRepositoryListItem | null
+  /**
+   * The ids of the repositories which the user has checked in order to perform
+   * a bulk action (such as putting several repositories in a group at once).
+   */
+  readonly checkedRepositoryIds: ReadonlySet<number>
+
+  /**
+   * The id of the group whose repositories are currently being checked out,
+   * fetched and pulled, if any.
+   */
+  readonly syncingGroupId: string | null
 }
 
 const RowHeight = 29
+
+/**
+ * Group headers get some extra height so that the group name and its action
+ * button aren't crammed against the top and bottom of the row.
+ */
+const GroupHeaderRowHeight = 38
+
+/**
+ * The external editors which a whole group of repositories can be opened in.
+ * These must match the names returned by the editor lookup in
+ * `app/src/lib/editors`.
+ */
+const visualStudioCodeEditorName = 'Visual Studio Code'
+const cursorEditorName = 'Cursor'
 
 /**
  * Iterate over all groups until a list item is found that matches
@@ -122,14 +165,20 @@ export class RepositoriesList extends React.Component<
     (
       repositories: ReadonlyArray<Repositoryish> | null,
       localRepositoryStateLookup: ReadonlyMap<number, ILocalRepositoryState>,
-      recentRepositories: ReadonlyArray<number>
+      recentRepositories: ReadonlyArray<number>,
+      repositoryGroups: ReadonlyArray<IRepositoryGroup>,
+      repositoryGroupAssignments: RepositoryGroupAssignments,
+      repositorySyncSteps: ReadonlyMap<number, RepositorySyncStep>
     ) =>
       repositories === null
         ? []
         : groupRepositories(
             repositories,
             localRepositoryStateLookup,
-            recentRepositories
+            recentRepositories,
+            repositoryGroups,
+            repositoryGroupAssignments,
+            repositorySyncSteps
           )
   )
 
@@ -150,8 +199,19 @@ export class RepositoriesList extends React.Component<
     this.state = {
       newRepositoryMenuExpanded: false,
       selectedItem: null,
+      checkedRepositoryIds: new Set<number>(),
+      syncingGroupId: null,
     }
   }
+
+  /**
+   * Group headers need a little more vertical room than the repository rows so
+   * that the group name and its action button aren't crammed against the top
+   * and bottom of the row. Header rows are the ones without an item.
+   */
+  private getRowHeight = (info: {
+    readonly item: IRepositoryListItem | null
+  }): number => (info.item === null ? GroupHeaderRowHeight : RowHeight)
 
   private renderItem = (item: IRepositoryListItem, matches: IMatches) => {
     const repository = item.repository
@@ -163,6 +223,10 @@ export class RepositoriesList extends React.Component<
         matches={matches}
         aheadBehind={item.aheadBehind}
         changedFilesCount={item.changedFilesCount}
+        checked={this.state.checkedRepositoryIds.has(repository.id)}
+        selectionActive={this.state.checkedRepositoryIds.size > 0}
+        onToggleChecked={this.onToggleChecked}
+        syncStep={item.syncStep}
       />
     )
   }
@@ -250,13 +314,117 @@ export class RepositoriesList extends React.Component<
       return group.owner.login
     } else if (kind === 'recent') {
       return 'Recent'
+    } else if (kind === 'custom') {
+      return group.group.name
     } else {
       assertNever(kind, `Unknown repository group kind ${kind}`)
     }
   }
 
+  private onGroupHeaderContextMenu = (
+    event: React.MouseEvent<HTMLDivElement>
+  ) => {
+    const groupId = event.currentTarget.dataset.repositoryGroupId
+    const group = this.props.repositoryGroups.find(g => g.id === groupId)
+
+    if (group === undefined) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    showContextualMenu([
+      {
+        label: __DARWIN__
+          ? 'Check Out Master, Fetch and Pull'
+          : 'Check out master, fetch and pull',
+        enabled: this.state.syncingGroupId === null,
+        action: () => {
+          void this.syncGroup(group.id)
+        },
+      },
+      { type: 'separator' },
+      {
+        label: __DARWIN__
+          ? 'Open All in Visual Studio Code'
+          : 'Open all in Visual Studio Code',
+        action: () => {
+          void this.props.dispatcher.openRepositoriesInExternalEditor(
+            this.getGroupRepositories(group.id),
+            visualStudioCodeEditorName,
+            { name: group.name, id: group.id }
+          )
+        },
+      },
+      {
+        label: __DARWIN__ ? 'Open All in Cursor' : 'Open all in Cursor',
+        action: () => {
+          void this.props.dispatcher.openRepositoriesInExternalEditor(
+            this.getGroupRepositories(group.id),
+            cursorEditorName,
+            { name: group.name, id: group.id }
+          )
+        },
+      },
+      { type: 'separator' },
+      {
+        label: __DARWIN__ ? 'Rename Group…' : 'Rename group…',
+        action: () => this.onRenameRepositoryGroup(group),
+      },
+      { type: 'separator' },
+      {
+        label: __DARWIN__ ? 'Delete Group' : 'Delete group',
+        action: () => this.props.dispatcher.deleteRepositoryGroup(group.id),
+      },
+    ])
+  }
+
   private renderGroupHeader = (group: RepositoryListGroup) => {
     const label = this.getGroupLabel(group)
+
+    if (group.kind === 'custom') {
+      const groupId = group.group.id
+      const isSyncing = this.state.syncingGroupId === groupId
+      const syncButtonLabel = `Check out master, fetch and pull all repositories in ${label}`
+
+      return (
+        <div
+          key={getGroupKey(group)}
+          className={classNames(
+            'filter-list-group-header',
+            'repository-group-header',
+            { syncing: isSyncing }
+          )}
+          data-repository-group-id={groupId}
+          onContextMenu={this.onGroupHeaderContextMenu}
+        >
+          <Octicon
+            symbol={octicons.fileDirectoryFill}
+            className="repository-group-icon"
+          />
+          <TooltippedContent
+            tooltip={label}
+            onlyWhenOverflowed={true}
+            className="repository-group-name"
+          >
+            {label}
+          </TooltippedContent>
+          <Button
+            className="repository-group-sync-button"
+            onClick={this.onSyncGroupClick}
+            disabled={this.state.syncingGroupId !== null}
+            ariaLabel={syncButtonLabel}
+            tooltip={syncButtonLabel}
+          >
+            <Octicon
+              symbol={octicons.sync}
+              className={isSyncing ? 'repository-group-spinning' : undefined}
+            />
+          </Button>
+        </div>
+      )
+    }
 
     return (
       <TooltippedContent
@@ -269,6 +437,50 @@ export class RepositoriesList extends React.Component<
         {label}
       </TooltippedContent>
     )
+  }
+
+  private onSyncGroupClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const groupId =
+      event.currentTarget
+        .closest('[data-repository-group-id]')
+        ?.getAttribute('data-repository-group-id') ?? undefined
+
+    if (groupId !== undefined) {
+      void this.syncGroup(groupId)
+    }
+  }
+
+  /** The repositories which have been assigned to the given group. */
+  private getGroupRepositories = (groupId: string): ReadonlyArray<Repository> =>
+    this.props.repositories.filter(
+      (repository): repository is Repository =>
+        repository instanceof Repository &&
+        this.props.repositoryGroupAssignments.get(repository.id) === groupId
+    )
+
+  /**
+   * Check out master, fetch and pull every repository in the group.
+   *
+   * Only one group can be updated at a time.
+   */
+  private syncGroup = async (groupId: string) => {
+    if (this.state.syncingGroupId !== null) {
+      return
+    }
+
+    const repositories = this.getGroupRepositories(groupId)
+
+    if (repositories.length === 0) {
+      return
+    }
+
+    this.setState({ syncingGroupId: groupId })
+
+    try {
+      await this.props.dispatcher.syncRepositoryGroup(repositories)
+    } finally {
+      this.setState({ syncingGroupId: null })
+    }
   }
 
   private onItemClick = (item: IRepositoryListItem) => {
@@ -305,10 +517,40 @@ export class RepositoriesList extends React.Component<
         ? this.onShowWorktrees
         : undefined,
       repository: item.repository,
+      repositoryGroups: this.props.repositoryGroups,
+      currentRepositoryGroupId:
+        item.repository instanceof Repository
+          ? this.props.repositoryGroupAssignments.get(item.repository.id) ??
+            null
+          : null,
+      onSetRepositoryGroup: this.onSetRepositoryGroup,
+      onCreateRepositoryGroup: this.onCreateRepositoryGroup,
       shellLabel: this.props.shellLabel,
     })
 
     showContextualMenu(items)
+  }
+
+  private onSetRepositoryGroup = (
+    repository: Repository,
+    groupId: string | null
+  ) => {
+    this.props.dispatcher.setRepositoryGroup(repository, groupId)
+  }
+
+  private onCreateRepositoryGroup = (repository: Repository) => {
+    this.props.dispatcher.showPopup({
+      type: PopupType.CreateRepositoryGroup,
+      repositories: [repository],
+    })
+  }
+
+  private onRenameRepositoryGroup = (group: IRepositoryGroup) => {
+    this.props.dispatcher.showPopup({
+      type: PopupType.RenameRepositoryGroup,
+      groupId: group.id,
+      initialName: group.name,
+    })
   }
 
   private getItemAriaLabel = (item: IRepositoryListItem) => item.repository.name
@@ -325,7 +567,10 @@ export class RepositoriesList extends React.Component<
     const groups = this.getRepositoryGroups(
       this.props.repositories,
       this.props.localRepositoryStateLookup,
-      this.props.recentRepositories
+      this.props.recentRepositories,
+      this.props.repositoryGroups,
+      this.props.repositoryGroupAssignments,
+      this.props.repositorySyncSteps
     )
 
     // So there's two types of selection at play here. There's the repository
@@ -340,7 +585,7 @@ export class RepositoriesList extends React.Component<
     return (
       <div className="repository-list">
         <SectionFilterList<IRepositoryListItem, RepositoryListGroup>
-          rowHeight={RowHeight}
+          rowHeight={this.getRowHeight}
           selectedItem={selectedItem}
           filterText={this.props.filterText}
           onFilterTextChanged={this.props.onFilterTextChanged}
@@ -354,6 +599,10 @@ export class RepositoriesList extends React.Component<
           invalidationProps={{
             repositories: this.props.repositories,
             filterText: this.props.filterText,
+            repositoryGroups: this.props.repositoryGroups,
+            repositoryGroupAssignments: this.props.repositoryGroupAssignments,
+            repositorySyncSteps: this.props.repositorySyncSteps,
+            checkedRepositoryIds: this.state.checkedRepositoryIds,
           }}
           onItemContextMenu={this.onItemContextMenu}
           getGroupAriaLabel={this.getGroupAriaLabelGetter(groups)}
@@ -369,6 +618,20 @@ export class RepositoriesList extends React.Component<
   }
 
   private renderPostFilter = () => {
+    const checkedCount = this.state.checkedRepositoryIds.size
+
+    if (checkedCount > 0) {
+      return (
+        <Button
+          className="bulk-selection-button"
+          onClick={this.onBulkSelectionButtonClick}
+        >
+          {checkedCount} selected
+          <Octicon symbol={octicons.triangleDown} />
+        </Button>
+      )
+    }
+
     return (
       <Button
         className="new-repository-button"
@@ -380,6 +643,105 @@ export class RepositoriesList extends React.Component<
         <Octicon symbol={octicons.triangleDown} />
       </Button>
     )
+  }
+
+  private onToggleChecked = (repository: Repositoryish) => {
+    const checkedRepositoryIds = new Set(this.state.checkedRepositoryIds)
+
+    if (checkedRepositoryIds.has(repository.id)) {
+      checkedRepositoryIds.delete(repository.id)
+    } else {
+      checkedRepositoryIds.add(repository.id)
+    }
+
+    this.setState({ checkedRepositoryIds })
+  }
+
+  /** The repositories (in list order) which are currently checked. */
+  private getCheckedRepositories = (): ReadonlyArray<Repository> =>
+    this.props.repositories.filter(
+      (repository): repository is Repository =>
+        repository instanceof Repository &&
+        this.state.checkedRepositoryIds.has(repository.id)
+    )
+
+  private onSelectAllRepositories = () => {
+    const checkedRepositoryIds = new Set<number>()
+
+    for (const repository of this.props.repositories) {
+      if (repository instanceof Repository) {
+        checkedRepositoryIds.add(repository.id)
+      }
+    }
+
+    this.setState({ checkedRepositoryIds })
+  }
+
+  private onClearCheckedRepositories = () => {
+    this.setState({ checkedRepositoryIds: new Set<number>() })
+  }
+
+  private onBulkSelectionButtonClick = () => {
+    const repositories = this.getCheckedRepositories()
+
+    if (repositories.length === 0) {
+      return
+    }
+
+    const items: Array<IMenuItem> = []
+
+    for (const group of this.props.repositoryGroups) {
+      items.push({
+        label: group.name,
+        type: 'checkbox',
+        checked: repositories.every(
+          repository =>
+            this.props.repositoryGroupAssignments.get(repository.id) ===
+            group.id
+        ),
+        action: () => {
+          this.props.dispatcher.setRepositoriesGroup(repositories, group.id)
+          this.onClearCheckedRepositories()
+        },
+      })
+    }
+
+    if (items.length > 0) {
+      items.push({ type: 'separator' })
+    }
+
+    items.push(
+      {
+        label: __DARWIN__ ? 'New Group…' : 'New group…',
+        action: () => {
+          this.props.dispatcher.showPopup({
+            type: PopupType.CreateRepositoryGroup,
+            repositories,
+          })
+          this.onClearCheckedRepositories()
+        },
+      },
+      {
+        label: __DARWIN__ ? 'Remove from Group' : 'Remove from group',
+        action: () => {
+          this.props.dispatcher.setRepositoriesGroup(repositories, null)
+          this.onClearCheckedRepositories()
+        },
+      },
+      { type: 'separator' },
+      {
+        label: __DARWIN__
+          ? 'Select All Repositories'
+          : 'Select all repositories',
+        action: this.onSelectAllRepositories,
+      },
+      {
+        label: __DARWIN__ ? 'Clear Selection' : 'Clear selection',
+        action: this.onClearCheckedRepositories,
+      }
+    )
+
+    showContextualMenu(items)
   }
 
   private onNewRepositoryButtonKeyDown = (

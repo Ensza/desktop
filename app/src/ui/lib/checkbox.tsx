@@ -19,6 +19,22 @@ interface ICheckboxProps {
   /** The function to call on value change. */
   readonly onChange?: (event: React.FormEvent<HTMLInputElement>) => void
 
+  /**
+   * The function to call when the checkbox is clicked.
+   *
+   * This is useful for stopping the click from bubbling up to a parent element,
+   * for example a list item where clicking anywhere else navigates.
+   */
+  readonly onClick?: (event: React.MouseEvent<HTMLInputElement>) => void
+
+  /**
+   * The function to call when a mouse button is pressed on the checkbox.
+   *
+   * Useful in conjunction with `onClick` to stop a parent list item from
+   * changing its selection in response to the press.
+   */
+  readonly onMouseDown?: (event: React.MouseEvent<HTMLInputElement>) => void
+
   /** The tab index of the input element. */
   readonly tabIndex?: number
 
@@ -122,6 +138,8 @@ export class Checkbox extends React.Component<ICheckboxProps, ICheckboxState> {
           tabIndex={this.props.tabIndex}
           type="checkbox"
           onChange={this.onChange}
+          onClick={this.props.onClick}
+          onMouseDown={this.props.onMouseDown}
           onDoubleClick={this.onDoubleClick}
           ref={this.onInputRef}
           disabled={this.props.disabled}

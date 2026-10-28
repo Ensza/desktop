@@ -146,6 +146,11 @@ import { CommitDragElement } from './drag-elements/commit-drag-element'
 import classNames from 'classnames'
 import { MoveToApplicationsFolder } from './move-to-applications-folder'
 import { ChangeRepositoryAlias } from './change-repository-alias/change-repository-alias-dialog'
+import {
+  RepositoryGroupDialog,
+  RepositoryGroupDialogMode,
+} from './repository-groups/repository-group-dialog'
+import { AddRepositoriesAsGroup } from './repository-groups/add-repositories-as-group-dialog'
 import { ThankYou } from './thank-you'
 import {
   getUserContributions,
@@ -1245,16 +1250,11 @@ export class App extends React.Component<IAppProps, IAppState> {
     const paths = Array.from(fileList, webUtils.getPathForFile)
     const { dispatcher } = this.props
 
-    // If they're bulk adding repositories then just blindly try to add them.
-    // But if they just dragged one, use the dialog so that they can initialize
-    // it if needed.
+    // If they've dropped several folders onto the app we ask whether they want
+    // them to be added as a group. If they just dragged one, use the dialog so
+    // that they can initialize it if needed.
     if (paths.length > 1) {
-      const addedRepositories = await dispatcher.addRepositories(paths)
-
-      if (addedRepositories.length > 0) {
-        dispatcher.recordAddExistingRepository()
-        await dispatcher.selectRepository(addedRepositories[0])
-      }
+      await this.showPopup({ type: PopupType.AddRepositoriesAsGroup, paths })
     } else if (paths.length === 1) {
       // user may accidentally provide a folder within the repository
       // this ensures we use the repository root, if it is actually a repository
@@ -2386,6 +2386,41 @@ export class App extends React.Component<IAppProps, IAppState> {
           />
         )
       }
+      case PopupType.CreateRepositoryGroup: {
+        return (
+          <RepositoryGroupDialog
+            dispatcher={this.props.dispatcher}
+            mode={RepositoryGroupDialogMode.Create}
+            initialName=""
+            repositories={popup.repositories}
+            existingNames={this.state.repositoryGroups.map(group => group.name)}
+            onDismissed={onPopupDismissedFn}
+          />
+        )
+      }
+      case PopupType.RenameRepositoryGroup: {
+        return (
+          <RepositoryGroupDialog
+            dispatcher={this.props.dispatcher}
+            mode={RepositoryGroupDialogMode.Rename}
+            groupId={popup.groupId}
+            initialName={popup.initialName}
+            existingNames={this.state.repositoryGroups
+              .filter(group => group.id !== popup.groupId)
+              .map(group => group.name)}
+            onDismissed={onPopupDismissedFn}
+          />
+        )
+      }
+      case PopupType.AddRepositoriesAsGroup: {
+        return (
+          <AddRepositoriesAsGroup
+            dispatcher={this.props.dispatcher}
+            paths={popup.paths}
+            onDismissed={onPopupDismissedFn}
+          />
+        )
+      }
       case PopupType.ThankYou:
         return (
           <ThankYou
@@ -3397,6 +3432,9 @@ export class App extends React.Component<IAppProps, IAppState> {
         onSelectionChanged={this.onSelectionChanged}
         repositories={repositories}
         recentRepositories={this.state.recentRepositories}
+        repositoryGroups={this.state.repositoryGroups}
+        repositoryGroupAssignments={this.state.repositoryGroupAssignments}
+        repositorySyncSteps={this.state.repositorySyncSteps}
         localRepositoryStateLookup={this.state.localRepositoryStateLookup}
         askForConfirmationOnRemoveRepository={
           this.state.askForConfirmationOnRepositoryRemoval
@@ -3594,6 +3632,20 @@ export class App extends React.Component<IAppProps, IAppState> {
       this.showWorktrees()
     }
 
+    const onCreateRepositoryGroup = (repository: Repository) => {
+      this.props.dispatcher.showPopup({
+        type: PopupType.CreateRepositoryGroup,
+        repositories: [repository],
+      })
+    }
+
+    const onSetRepositoryGroup = (
+      repository: Repository,
+      groupId: string | null
+    ) => {
+      this.props.dispatcher.setRepositoryGroup(repository, groupId)
+    }
+
     const items = generateRepositoryListContextMenu({
       onRemoveRepository: this.removeRepository,
       onShowRepository: this.showRepository,
@@ -3608,6 +3660,13 @@ export class App extends React.Component<IAppProps, IAppState> {
       onCreateWorktree: enableWorktreeSupport() ? onCreateWorktree : undefined,
       onShowWorktrees: enableWorktreeSupport() ? onShowWorktrees : undefined,
       repository: repository,
+      repositoryGroups: this.state.repositoryGroups,
+      currentRepositoryGroupId:
+        repository instanceof Repository
+          ? this.state.repositoryGroupAssignments.get(repository.id) ?? null
+          : null,
+      onSetRepositoryGroup: onSetRepositoryGroup,
+      onCreateRepositoryGroup: onCreateRepositoryGroup,
       shellLabel: this.state.useCustomShell
         ? undefined
         : this.state.selectedShell,

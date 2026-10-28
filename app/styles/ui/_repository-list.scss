@@ -34,6 +34,36 @@
     // name and truncate accordingly
     width: 100%;
 
+    /**
+     * The checkbox used to select repositories for a bulk action. It's kept in
+     * the layout at all times (to avoid the row shifting around when it
+     * appears) but only shown when the row is hovered, focused, or when a
+     * selection is already in progress.
+     */
+    .repository-list-item-checkbox {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 20px;
+      margin-right: var(--spacing-half);
+      opacity: 0;
+
+      .checkbox-component {
+        width: auto;
+
+        input {
+          margin: 0;
+        }
+      }
+    }
+
+    &:hover .repository-list-item-checkbox,
+    &:focus-within .repository-list-item-checkbox,
+    &.selection-active .repository-list-item-checkbox {
+      opacity: 1;
+    }
+
     .icon-for-repository {
       // Some room between the icon and repository name
       margin-right: var(--spacing-half);
@@ -67,15 +97,83 @@
     }
   }
 
+  /**
+   * Repository list group headers are given a taller row (see
+   * `GroupHeaderRowHeight` in repositories-list.tsx) so that their content is
+   * vertically centered with some room to breathe, instead of being pushed
+   * down by a top padding.
+   */
   .filter-list-group-header {
-    padding-top: var(--spacing);
     text-overflow: ellipsis;
     overflow-x: hidden;
     white-space: nowrap;
   }
 
+  /**
+   * Custom groups are deliberately styled differently from the automatic
+   * owner/Enterprise groups so that the two don't get confused. They also get
+   * an action button which checks out master, fetches and pulls every
+   * repository in the group.
+   */
+  .repository-group-header {
+    display: flex;
+    align-items: center;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary-color);
+
+    .repository-group-icon {
+      flex-shrink: 0;
+      margin-right: var(--spacing-half);
+    }
+
+    .repository-group-name {
+      @include ellipsis;
+
+      // Let the name shrink so the ellipsis kicks in before the action button
+      // is pushed out of the row.
+      min-width: 0;
+
+      // Guarantee some breathing room between the name and the action button
+      // (the button is pushed to the right edge by its auto margin).
+      margin-right: var(--spacing);
+    }
+
+    .repository-group-sync-button {
+      flex-shrink: 0;
+      margin-left: auto;
+      padding: 0 var(--spacing-half);
+      min-width: 20px;
+      height: 20px;
+      line-height: 1;
+
+      // Keep the list quiet until the group is hovered or keyboard focused.
+      opacity: 0;
+
+      .octicon {
+        margin: 0;
+      }
+    }
+
+    &:hover .repository-group-sync-button,
+    &:focus-within .repository-group-sync-button,
+    &.syncing .repository-group-sync-button {
+      opacity: 1;
+    }
+  }
+
   .new-repository-button {
     flex-shrink: 0;
+
+    .octicon {
+      margin-left: 5px;
+    }
+  }
+
+  .bulk-selection-button {
+    flex-shrink: 0;
+    white-space: nowrap;
 
     .octicon {
       margin-left: 5px;
@@ -173,6 +271,24 @@
     margin-right: var(--spacing-half);
   }
 
+  /**
+   * Shows what a repository is doing while a group is being updated (switching
+   * branch, fetching or pulling).
+   */
+  .repository-sync-state {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    margin-right: var(--spacing-half);
+    font-size: var(--font-size-sm);
+    color: inherit;
+
+    .octicon {
+      flex-shrink: 0;
+      margin-right: var(--spacing-third);
+    }
+  }
+
   .change-indicator-wrapper {
     display: flex;
     min-width: 12px;
@@ -222,4 +338,22 @@
   .change-indicator-wrapper {
     justify-content: unset;
   }
+}
+
+@keyframes repository-group-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/**
+ * Rotates the sync icon while a group (or one of its repositories) is being
+ * updated.
+ */
+.repository-group-spinning,
+.repository-sync-spinning {
+  animation: repository-group-spin 1s linear infinite;
 }

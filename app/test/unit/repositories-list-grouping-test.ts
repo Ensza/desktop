@@ -3,6 +3,8 @@ import assert from 'node:assert'
 import { groupRepositories } from '../../src/ui/repositories-list/group-repositories'
 import { Repository, ILocalRepositoryState } from '../../src/models/repository'
 import { CloningRepository } from '../../src/models/cloning-repository'
+import { IRepositoryGroup } from '../../src/models/repository-group'
+import { RepositorySyncStep } from '../../src/models/repository-sync'
 import { gitHubRepoFixture } from '../helpers/github-repo-builder'
 
 describe('repository list grouping', () => {
@@ -152,5 +154,178 @@ describe('repository list grouping', () => {
 
     assert.equal(grouped[2].items[1].text[0], 'enterprise-repo')
     assert(grouped[2].items[1].needsDisambiguation)
+  })
+
+  describe('custom groups', () => {
+    const workGroup: IRepositoryGroup = { id: 'work', name: 'Work' }
+
+    it('places repositories assigned to a custom group in that group', () => {
+      const repoA = new Repository(
+        'a',
+        1,
+        gitHubRepoFixture({ owner: 'me', name: 'a' }),
+        false
+      )
+      const repoB = new Repository(
+        'b',
+        2,
+        gitHubRepoFixture({ owner: 'me', name: 'b' }),
+        false
+      )
+
+      const grouped = groupRepositories(
+        [repoA, repoB],
+        cache,
+        [],
+        [workGroup],
+        new Map([[1, workGroup.id]])
+      )
+
+      assert.equal(grouped.length, 2)
+
+      assert.equal(grouped[0].identifier.kind, 'custom')
+      assert.equal((grouped[0].identifier as any).group.name, 'Work')
+      assert.deepEqual(
+        grouped[0].items.map(i => i.repository.path),
+        ['a']
+      )
+
+      assert.equal(grouped[1].identifier.kind, 'dotcom')
+      assert.equal((grouped[1].identifier as any).owner.login, 'me')
+      assert.deepEqual(
+        grouped[1].items.map(i => i.repository.path),
+        ['b']
+      )
+    })
+
+    it('falls back to the automatic grouping when the group no longer exists', () => {
+      const repo = new Repository(
+        'a',
+        1,
+        gitHubRepoFixture({ owner: 'me', name: 'a' }),
+        false
+      )
+
+      const grouped = groupRepositories(
+        [repo],
+        cache,
+        [],
+        [],
+        new Map([[1, 'deleted-group']])
+      )
+
+      assert.equal(grouped.length, 1)
+      assert.equal(grouped[0].identifier.kind, 'dotcom')
+      assert.equal(grouped[0].items.length, 1)
+    })
+
+    it('lists custom groups after recent and before owner groups', () => {
+      const repositories = Array.from(
+        { length: 8 },
+        (_, i) =>
+          new Repository(
+            `repo${i}`,
+            i + 1,
+            gitHubRepoFixture({ owner: `owner${i}`, name: `repo${i}` }),
+            false
+          )
+      )
+
+      const grouped = groupRepositories(
+        repositories,
+        cache,
+        [8],
+        [workGroup],
+        new Map([[8, workGroup.id]])
+      )
+
+      assert.equal(grouped[0].identifier.kind, 'recent')
+      assert.equal(grouped[1].identifier.kind, 'custom')
+      assert.deepEqual(
+        grouped[1].items.map(i => i.repository.path),
+        ['repo7']
+      )
+      assert.equal(grouped[2].identifier.kind, 'dotcom')
+    })
+
+    it('keeps unassigned repositories out of custom groups', () => {
+      const repo = new Repository(
+        'a',
+        1,
+        gitHubRepoFixture({ owner: 'me', name: 'a' }),
+        false
+      )
+
+      const grouped = groupRepositories(
+        [repo],
+        cache,
+        [],
+        [workGroup],
+        new Map()
+      )
+
+      assert.equal(grouped.length, 1)
+      assert.equal(grouped[0].identifier.kind, 'dotcom')
+    })
+
+    it('disambiguates repositories with duplicate names in a custom group', () => {
+      const repoA = new Repository(
+        'repo',
+        1,
+        gitHubRepoFixture({ owner: 'user1', name: 'repo' }),
+        false
+      )
+      const repoB = new Repository(
+        'repo',
+        2,
+        gitHubRepoFixture({ owner: 'user2', name: 'repo' }),
+        false
+      )
+
+      const grouped = groupRepositories(
+        [repoA, repoB],
+        cache,
+        [],
+        [workGroup],
+        new Map([
+          [1, workGroup.id],
+          [2, workGroup.id],
+        ])
+      )
+
+      assert.equal(grouped.length, 1)
+      assert.equal(grouped[0].identifier.kind, 'custom')
+      assert.deepEqual(
+        grouped[0].items.map(i => i.needsDisambiguation),
+        [true, true]
+      )
+    })
+  })
+
+  it('exposes the group update step of each repository', () => {
+    const repoA = new Repository(
+      'a',
+      1,
+      gitHubRepoFixture({ owner: 'me', name: 'a' }),
+      false
+    )
+    const repoB = new Repository(
+      'b',
+      2,
+      gitHubRepoFixture({ owner: 'me', name: 'b' }),
+      false
+    )
+
+    const grouped = groupRepositories(
+      [repoA, repoB],
+      cache,
+      [],
+      [],
+      new Map(),
+      new Map<number, RepositorySyncStep>([[1, 'fetch']])
+    )
+
+    assert.equal(grouped[0].items[0].syncStep, 'fetch')
+    assert.equal(grouped[0].items[1].syncStep, null)
   })
 })

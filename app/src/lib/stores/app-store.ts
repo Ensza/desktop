@@ -176,8 +176,10 @@ import {
 import {
   findEditorOrDefault,
   getAvailableEditors,
+  IEditorWorkspace,
   launchCustomExternalEditor,
   launchExternalEditor,
+  launchExternalEditorWithPaths,
 } from '../editors'
 import { assertNever, fatalError, forceUnwrap } from '../fatal-error'
 
@@ -192,11 +194,14 @@ import {
   addRemote,
   checkoutBranch,
   createCommit,
+  fetch as fetchRepo,
   getAuthorIdentity,
+  getBranches,
   getChangedFiles,
   getCommitDiff,
   getMergeBase,
   getRemotes,
+  getStatus,
   getWorkingDirectoryDiff,
   isCoAuthoredByTrailer,
   pull as pullRepo,
@@ -292,6 +297,20 @@ import {
   setObject,
   getFloatNumber,
 } from '../local-storage'
+import {
+  createRepositoryGroupId,
+  loadRepositoryGroupAssignments,
+  loadRepositoryGroups,
+  normalizeRepositoryGroupAssignments,
+  saveRepositoryGroupAssignments,
+  saveRepositoryGroups,
+  setRepositoryGroupAssignment,
+} from '../repository-groups'
+import {
+  IRepositoryGroup,
+  RepositoryGroupAssignments,
+} from '../../models/repository-group'
+import { RepositorySyncStep } from '../../models/repository-sync'
 import { ExternalEditorError, suggestedExternalEditor } from '../editors/shared'
 import {
   CopilotAppError,
@@ -601,6 +620,23 @@ export class AppStore extends TypedBaseStore<IAppState> {
   private repositories: ReadonlyArray<Repository> = new Array<Repository>()
   private recentRepositories: ReadonlyArray<number> = new Array<number>()
 
+  /** The custom repository groups created by the user, in creation order. */
+  private repositoryGroups: ReadonlyArray<IRepositoryGroup> =
+    new Array<IRepositoryGroup>()
+
+  /** A map of repository ids to the id of the custom group they belong to. */
+  private repositoryGroupAssignments: RepositoryGroupAssignments = new Map<
+    number,
+    string
+  >()
+
+  /**
+   * A map of repository ids to the step of a group-wide update the repository
+   * is currently going through, see `_syncRepositoryGroup`.
+   */
+  private repositorySyncSteps: ReadonlyMap<number, RepositorySyncStep> =
+    new Map<number, RepositorySyncStep>()
+
   private selectedRepository: Repository | CloningRepository | null = null
 
   /** The background fetcher for the currently selected repository. */
@@ -786,6 +822,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
     super()
 
     this.showWelcomeFlow = !hasShownWelcomeFlow()
+
+    this.repositoryGroups = loadRepositoryGroups()
+    this.repositoryGroupAssignments = normalizeRepositoryGroupAssignments(
+      loadRepositoryGroupAssignments(),
+      this.repositoryGroups
+    )
 
     if (__WIN32__) {
       const useWindowsOpenSSH = getBoolean(UseWindowsOpenSSHKey)
@@ -1271,6 +1313,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
       accounts: this.accounts,
       repositories,
       recentRepositories: this.recentRepositories,
+      repositoryGroups: this.repositoryGroups,
+      repositoryGroupAssignments: this.repositoryGroupAssignments,
+      repositorySyncSteps: this.repositorySyncSteps,
       localRepositoryStateLookup: this.localRepositoryStateLookup,
       windowState: this.windowState,
       windowZoomFactor: this.windowZoomFactor,
@@ -5023,6 +5068,337 @@ export class AppStore extends TypedBaseStore<IAppState> {
     return this.repositoriesStore.updateRepositoryAlias(repository, newAlias)
   }
 
+  /**
+   * Create a new custom repository group and place the given repositories in
+   * it. Returns the id of the new group.
+   *
+   * This shouldn't be called directly. See `Dispatcher`.
+   */
+  public _createRepositoryGroup(
+    name: string,
+    repositories: ReadonlyArray<Repository>
+  ): string {
+    const trimmedName = name.trim()
+    const group: IRepositoryGroup = {
+      id: createRepositoryGroupId(),
+      name: trimmedName.length > 0 ? trimmedName : 'New group',
+    }
+
+    this.repositoryGroups = [...this.repositoryGroups, group]
+
+    if (repositories.length > 0) {
+      let assignments = this.repositoryGroupAssignments
+
+      for (const repository of repositories) {
+        assignments = setRepositoryGroupAssignment(
+          assignments,
+          repository.id,
+          group.id
+        )
+      }
+
+      this.repositoryGroupAssignments = assignments
+      saveRepositoryGroupAssignments(assignments)
+    }
+
+    saveRepositoryGroups(this.repositoryGroups)
+    this.emitUpdate()
+
+    return group.id
+  }
+
+  /** This shouldn't be called directly. See `Dispatcher`. */
+  public _renameRepositoryGroup(groupId: string, name: string): void {
+    const trimmedName = name.trim()
+
+    if (trimmedName.length === 0) {
+      return
+    }
+
+    const groups = this.repositoryGroups.map(group =>
+      group.id === groupId ? { ...group, name: trimmedName } : group
+    )
+
+    if (
+      groups.every((group, index) => group === this.repositoryGroups[index])
+    ) {
+      return
+    }
+
+    this.repositoryGroups = groups
+    saveRepositoryGroups(groups)
+    this.emitUpdate()
+  }
+
+  /**
+   * Delete the group with the given id. Repositories which were part of the
+   * group fall back to being grouped by owner/host.
+   *
+   * This shouldn't be called directly. See `Dispatcher`.
+   */
+  public _deleteRepositoryGroup(groupId: string): void {
+    const groups = this.repositoryGroups.filter(group => group.id !== groupId)
+
+    if (groups.length === this.repositoryGroups.length) {
+      return
+    }
+
+    this.repositoryGroups = groups
+
+    const assignments = new Map<number, string>()
+    const currentAssignments = this.repositoryGroupAssignments
+
+    for (const [repositoryId, assignedGroupId] of currentAssignments) {
+      if (assignedGroupId !== groupId) {
+        assignments.set(repositoryId, assignedGroupId)
+      }
+    }
+
+    this.repositoryGroupAssignments = assignments
+
+    saveRepositoryGroups(groups)
+    saveRepositoryGroupAssignments(assignments)
+    this.emitUpdate()
+  }
+
+  /**
+   * Place the repository with the given id in the given group, or remove it
+   * from any group when `groupId` is null.
+   *
+   * This shouldn't be called directly. See `Dispatcher`.
+   */
+  public _setRepositoryGroup(
+    repositoryId: number,
+    groupId: string | null
+  ): void {
+    this._setRepositoriesGroup([repositoryId], groupId)
+  }
+
+  /**
+   * Place all repositories with the given ids in the given group, or remove
+   * them from any group when `groupId` is null.
+   *
+   * This shouldn't be called directly. See `Dispatcher`.
+   */
+  public _setRepositoriesGroup(
+    repositoryIds: ReadonlyArray<number>,
+    groupId: string | null
+  ): void {
+    if (
+      groupId !== null &&
+      !this.repositoryGroups.some(group => group.id === groupId)
+    ) {
+      return
+    }
+
+    let assignments = this.repositoryGroupAssignments
+    let changed = false
+
+    for (const repositoryId of repositoryIds) {
+      const currentGroupId = assignments.get(repositoryId) ?? null
+
+      if (currentGroupId === groupId) {
+        continue
+      }
+
+      assignments = setRepositoryGroupAssignment(
+        assignments,
+        repositoryId,
+        groupId
+      )
+      changed = true
+    }
+
+    if (!changed) {
+      return
+    }
+
+    this.repositoryGroupAssignments = assignments
+    saveRepositoryGroupAssignments(assignments)
+    this.emitUpdate()
+  }
+
+  /**
+   * Checks out the `master` branch in every repository of a group, then fetches
+   * from and pulls in each one.
+   *
+   * If any of the repositories has uncommitted changes nothing is changed and
+   * the user is notified instead.
+   *
+   * This shouldn't be called directly. See `Dispatcher`.
+   */
+  public async _syncRepositoryGroup(
+    repositories: ReadonlyArray<Repository>
+  ): Promise<void> {
+    if (repositories.length === 0) {
+      return
+    }
+
+    const statuses = new Map<number, IStatusResult>()
+
+    for (const repository of repositories) {
+      let status: IStatusResult | null = null
+
+      try {
+        status = await getStatus(repository)
+      } catch (error) {
+        log.error(`Unable to get the status of ${nameOf(repository)}`, error)
+      }
+
+      if (status === null) {
+        this.emitError(
+          new Error(
+            `Unable to check the status of ${nameOf(
+              repository
+            )}, so no repositories in this group were updated.`
+          )
+        )
+        return
+      }
+
+      statuses.set(repository.id, status)
+    }
+
+    const missingRepositories = repositories.filter(
+      repository => statuses.get(repository.id)?.exists === false
+    )
+
+    if (missingRepositories.length > 0) {
+      const list = missingRepositories
+        .map(repository => `· ${nameOf(repository)} (${repository.path})`)
+        .join('\n')
+
+      this.emitError(
+        new Error(
+          `Nothing was updated because the following repositories could not be found:\n\n${list}`
+        )
+      )
+      return
+    }
+
+    const repositoriesWithChanges = repositories.filter(
+      repository =>
+        (statuses.get(repository.id)?.workingDirectory.files.length ?? 0) > 0
+    )
+
+    if (repositoriesWithChanges.length > 0) {
+      const list = repositoriesWithChanges
+        .map(repository => `· ${nameOf(repository)}`)
+        .join('\n')
+
+      this.emitError(
+        new Error(
+          `Nothing was updated. Some repositories in this group have uncommitted changes, commit or discard the changes in the following repositories and try again:\n\n${list}`
+        )
+      )
+      return
+    }
+
+    const failures = new Array<{ name: string; message: string }>()
+
+    for (const repository of repositories) {
+      const currentBranch = statuses.get(repository.id)?.currentBranch
+
+      try {
+        await this.syncRepositoryToMaster(repository, currentBranch)
+      } catch (error) {
+        log.error(`Unable to sync ${nameOf(repository)}`, error)
+        failures.push({
+          name: nameOf(repository),
+          message: error instanceof Error ? error.message : `${error}`,
+        })
+      } finally {
+        this.updateRepositorySyncStep(repository.id, null)
+      }
+    }
+
+    await Promise.all(
+      repositories.map(repository =>
+        this._refreshRepository(repository).catch(error => {
+          log.error(`Unable to refresh ${nameOf(repository)}`, error)
+        })
+      )
+    )
+
+    if (failures.length > 0) {
+      const list = failures
+        .map(failure => `· ${failure.name}: ${failure.message}`)
+        .join('\n')
+
+      this.emitError(
+        new Error(
+          `Some repositories in this group could not be updated:\n\n${list}`
+        )
+      )
+    }
+  }
+
+  /**
+   * Check out master in the repository and then fetch and pull.
+   *
+   * @param currentBranch The branch the repository is currently on, if known.
+   */
+  private async syncRepositoryToMaster(
+    repository: Repository,
+    currentBranch: string | undefined
+  ): Promise<void> {
+    const branches = await getBranches(repository, 'refs/heads')
+    const master = branches.find(branch => branch.name === 'master')
+
+    if (master === undefined) {
+      throw new Error('the repository has no local "master" branch')
+    }
+
+    if (currentBranch !== master.name) {
+      const gitStore = this.gitStoreCache.get(repository)
+
+      this.updateRepositorySyncStep(repository.id, 'checkout')
+      await checkoutBranch(repository, master, gitStore.currentRemote ?? null)
+    }
+
+    const remotes = await getRemotes(repository)
+    const remote =
+      remotes.find(r => r.name === master.upstreamRemoteName) ??
+      remotes.find(r => r.name === 'origin') ??
+      remotes.at(0)
+
+    if (remote === undefined) {
+      throw new Error('the repository has no remotes to fetch from')
+    }
+
+    this.updateRepositorySyncStep(repository.id, 'fetch')
+    await fetchRepo(repository, remote)
+
+    this.updateRepositorySyncStep(repository.id, 'pull')
+    await pullRepo(repository, remote)
+  }
+
+  /**
+   * Records the step of a group-wide update the repository is currently going
+   * through, or clears it when `step` is null.
+   */
+  private updateRepositorySyncStep(
+    repositoryId: number,
+    step: RepositorySyncStep | null
+  ): void {
+    const currentStep = this.repositorySyncSteps.get(repositoryId) ?? null
+
+    if (currentStep === step) {
+      return
+    }
+
+    const repositorySyncSteps = new Map(this.repositorySyncSteps)
+
+    if (step === null) {
+      repositorySyncSteps.delete(repositoryId)
+    } else {
+      repositorySyncSteps.set(repositoryId, step)
+    }
+
+    this.repositorySyncSteps = repositorySyncSteps
+    this.emitUpdate()
+  }
+
   /** This shouldn't be called directly. See `Dispatcher`. */
   public async _renameBranch(
     repository: Repository,
@@ -7741,6 +8117,48 @@ export class AppStore extends TypedBaseStore<IAppState> {
     }
   }
 
+  /**
+   * Open the given repositories in the named external editor, if it's
+   * installed.
+   *
+   * When there's more than one repository they're opened as a named multi-root
+   * workspace (see `writeEditorWorkspaceFile`) so that the editor window is
+   * named after the workspace instead of being an anonymous untitled window.
+   *
+   * This shouldn't be called directly. See `Dispatcher`.
+   */
+  public async _openRepositoriesInExternalEditor(
+    repositories: ReadonlyArray<Repository>,
+    editorName: string,
+    workspace: IEditorWorkspace
+  ): Promise<void> {
+    if (repositories.length === 0) {
+      return
+    }
+
+    try {
+      const editor = await findEditorOrDefault(editorName)
+
+      if (editor === null) {
+        this.emitError(
+          new ExternalEditorError(
+            `No suitable editors installed for GitHub Desktop to launch. Install ${editorName} for your platform and restart GitHub Desktop to try again.`,
+            { suggestDefaultEditor: true }
+          )
+        )
+        return
+      }
+
+      await launchExternalEditorWithPaths(
+        repositories.map(repository => repository.path),
+        editor,
+        workspace
+      )
+    } catch (error) {
+      this.emitError(error)
+    }
+  }
+
   /** This shouldn't be called directly. See `Dispatcher`. */
   public async _openInCopilotApp(repositoryPath: string): Promise<void> {
     if (!enableCopilotAppHandoff()) {
@@ -8397,6 +8815,13 @@ export class AppStore extends TypedBaseStore<IAppState> {
     } catch (err) {
       this.emitError(err)
       return
+    }
+
+    if (
+      repository instanceof Repository &&
+      this.repositoryGroupAssignments.has(repository.id)
+    ) {
+      this._setRepositoryGroup(repository.id, null)
     }
 
     const allRepositories = await this.repositoriesStore.getAll()

@@ -80,6 +80,9 @@ export enum PopupType {
   ConfirmDiscardSelection = 'ConfirmDiscardSelection',
   MoveToApplicationsFolder = 'MoveToApplicationsFolder',
   ChangeRepositoryAlias = 'ChangeRepositoryAlias',
+  CreateRepositoryGroup = 'CreateRepositoryGroup',
+  RenameRepositoryGroup = 'RenameRepositoryGroup',
+  AddRepositoriesAsGroup = 'AddRepositoriesAsGroup',
   ThankYou = 'ThankYou',
   CommitMessage = 'CommitMessage',
   MultiCommitOperation = 'MultiCommitOperation',
@@ -345,6 +348,21 @@ export type PopupDetail =
     }
   | { type: PopupType.MoveToApplicationsFolder }
   | { type: PopupType.ChangeRepositoryAlias; repository: Repository }
+  | {
+      type: PopupType.CreateRepositoryGroup
+      /** The repositories to place in the new group. */
+      repositories: ReadonlyArray<Repository>
+    }
+  | {
+      type: PopupType.RenameRepositoryGroup
+      groupId: string
+      initialName: string
+    }
+  | {
+      type: PopupType.AddRepositoriesAsGroup
+      /** The folders which were dropped onto the app. */
+      paths: ReadonlyArray<string>
+    }
   | {
       type: PopupType.ThankYou
       userContributions: ReadonlyArray<ReleaseNote>

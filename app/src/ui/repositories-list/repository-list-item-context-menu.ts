@@ -1,6 +1,7 @@
 import { Repository } from '../../models/repository'
 import { IMenuItem } from '../../lib/menu-item'
 import { Repositoryish } from './group-repositories'
+import { IRepositoryGroup } from '../../models/repository-group'
 import { writeClipboardText } from '../main-process-proxy'
 import {
   RevealInFileManagerLabel,
@@ -13,6 +14,12 @@ interface IRepositoryListItemContextMenuConfig {
   shellLabel: string | undefined
   externalEditorLabel: string | undefined
   askForConfirmationOnRemoveRepository: boolean
+  /** The custom groups available to move the repository into. */
+  repositoryGroups: ReadonlyArray<IRepositoryGroup>
+  /** The id of the group the repository currently belongs to, if any. */
+  currentRepositoryGroupId: string | null
+  onSetRepositoryGroup: (repository: Repository, groupId: string | null) => void
+  onCreateRepositoryGroup: (repository: Repository) => void
   onViewOnGitHub: (repository: Repositoryish) => void
   onOpenInShell: (repository: Repositoryish) => void
   onShowRepository: (repository: Repositoryish) => void
@@ -40,6 +47,7 @@ export const generateRepositoryListContextMenu = (
 
   const items: ReadonlyArray<IMenuItem> = [
     ...buildAliasMenuItems(config),
+    ...buildGroupMenuItems(config),
     ...buildWorktreeMenuItems(config),
     {
       label: __DARWIN__ ? 'Copy Repo Name' : 'Copy repo name',
@@ -105,6 +113,56 @@ const buildAliasMenuItems = (
   }
 
   return items
+}
+
+const buildGroupMenuItems = (
+  config: IRepositoryListItemContextMenuConfig
+): ReadonlyArray<IMenuItem> => {
+  const {
+    repository,
+    repositoryGroups,
+    currentRepositoryGroupId,
+    onSetRepositoryGroup,
+    onCreateRepositoryGroup,
+  } = config
+
+  // Only repositories which exist in the app (and therefore have a stable id)
+  // can be part of a group.
+  if (!(repository instanceof Repository)) {
+    return []
+  }
+
+  const items: Array<IMenuItem> = repositoryGroups.map(
+    (group): IMenuItem => ({
+      label: group.name,
+      type: 'checkbox',
+      checked: group.id === currentRepositoryGroupId,
+      action: () => onSetRepositoryGroup(repository, group.id),
+    })
+  )
+
+  if (items.length > 0) {
+    items.push({ type: 'separator' })
+  }
+
+  items.push({
+    label: __DARWIN__ ? 'New Group…' : 'New group…',
+    action: () => onCreateRepositoryGroup(repository),
+  })
+
+  if (currentRepositoryGroupId !== null) {
+    items.push({
+      label: __DARWIN__ ? 'Remove from Group' : 'Remove from group',
+      action: () => onSetRepositoryGroup(repository, null),
+    })
+  }
+
+  return [
+    {
+      label: 'Group',
+      submenu: items,
+    },
+  ]
 }
 
 const buildWorktreeMenuItems = (

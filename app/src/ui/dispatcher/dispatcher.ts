@@ -10,6 +10,7 @@ import {
   IAPICreatePushProtectionBypassResponse,
 } from '../../lib/api'
 import { shell } from '../../lib/app-shell'
+import { IEditorWorkspace } from '../../lib/editors'
 import {
   CompareAction,
   Foldout,
@@ -876,6 +877,63 @@ export class Dispatcher {
     return this.appStore._changeRepositoryAlias(repository, newAlias)
   }
 
+  /**
+   * Creates a new custom repository group, placing the given repositories in
+   * it. Returns the id of the newly created group.
+   */
+  public createRepositoryGroup(
+    name: string,
+    repositories: ReadonlyArray<Repository>
+  ): string {
+    return this.appStore._createRepositoryGroup(name, repositories)
+  }
+
+  /** Renames the custom repository group with the given id. */
+  public renameRepositoryGroup(groupId: string, name: string): void {
+    this.appStore._renameRepositoryGroup(groupId, name)
+  }
+
+  /** Deletes the custom repository group with the given id. */
+  public deleteRepositoryGroup(groupId: string): void {
+    this.appStore._deleteRepositoryGroup(groupId)
+  }
+
+  /**
+   * Places the repository in the given custom group, or removes it from its
+   * current group when `groupId` is null.
+   */
+  public setRepositoryGroup(
+    repository: Repository,
+    groupId: string | null
+  ): void {
+    this.appStore._setRepositoryGroup(repository.id, groupId)
+  }
+
+  /**
+   * Places all of the given repositories in the given custom group, or removes
+   * them from their current groups when `groupId` is null.
+   */
+  public setRepositoriesGroup(
+    repositories: ReadonlyArray<Repository>,
+    groupId: string | null
+  ): void {
+    this.appStore._setRepositoriesGroup(
+      repositories.map(repository => repository.id),
+      groupId
+    )
+  }
+
+  /**
+   * Checks out the master branch in every repository of a group, then fetches
+   * from and pulls in each one. Nothing is changed if any of the repositories
+   * has uncommitted changes, the user is notified instead.
+   */
+  public syncRepositoryGroup(
+    repositories: ReadonlyArray<Repository>
+  ): Promise<void> {
+    return this.appStore._syncRepositoryGroup(repositories)
+  }
+
   /** Rename the branch to a new name. */
   public renameBranch(
     repository: Repository,
@@ -1639,6 +1697,26 @@ export class Dispatcher {
    */
   public async openInExternalEditor(fullPath: string): Promise<void> {
     return this.appStore._openInExternalEditor(fullPath)
+  }
+
+  /**
+   * Opens all of the given repositories in the named external editor, if it's
+   * installed.
+   *
+   * When there's more than one repository they're opened as a named multi-root
+   * workspace, so the editor window is named after the repository group
+   * instead of being an anonymous untitled window.
+   */
+  public async openRepositoriesInExternalEditor(
+    repositories: ReadonlyArray<Repository>,
+    editorName: string,
+    workspace: IEditorWorkspace
+  ): Promise<void> {
+    return this.appStore._openRepositoriesInExternalEditor(
+      repositories,
+      editorName,
+      workspace
+    )
   }
 
   /** Open the selected checkout in the GitHub Copilot app. */
