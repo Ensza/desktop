@@ -3,7 +3,7 @@
   "productName": "GitHub Desktop (Unofficial)",
   "bundleID": "com.ensza.GitHubDesktopUnofficial",
   "companyName": "Ensza (unofficial GitHub Desktop fork)",
-  "version": "3.6.10-beta1",
+  "version": "3.6.10-unofficial1",
   "main": "./main.js",
   "repository": {
     "type": "git",

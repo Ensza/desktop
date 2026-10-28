@@ -35,8 +35,12 @@ const releases = Object.keys(changelogObj['releases'])
 assert(releases.length > 0, 'Expected at least one release')
 
 for (const release of releases) {
+  // In addition to upstream's `-betaN` and `-testN` suffixes, this fork
+  // publishes `-unofficialN` builds.
   assert(
-    /^([0-9]+.[0-9]+.[0-9]+)(-beta[0-9]+|-test[0-9]+)?$/.test(release),
+    /^([0-9]+.[0-9]+.[0-9]+)(-beta[0-9]+|-test[0-9]+|-unofficial[0-9]+)?$/.test(
+      release
+    ),
     `Release ${release} does not match the expected format`
   )
   const changes = changelogObj['releases'][release]

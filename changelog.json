@@ -1,5 +1,14 @@
 {
   "releases": {
+    "3.6.10-unofficial1": [
+      "[Added] Add repository groups to the repository list, with bulk actions to switch every repository in a group to its default branch, fetch, or pull",
+      "[Added] Open every repository in a group at once in VS Code or Cursor using a generated multi-root workspace",
+      "[Added] Add several folders as a group in one step by dropping them onto the repository list",
+      "[Added] Use the checkboxes in the repository list to add or remove several repositories from a group at once",
+      "[Improved] Show per-repository progress while a repository group is being synced",
+      "[Improved] Identify this build as GitHub Desktop (Unofficial) in the title bar, About dialog, menus, and installer, so it is clear it is not an official GitHub release",
+      "[Fixed] Prevent this build from sharing GitHub Desktop's install directory, uninstall entry, and notification identity, and stop it from updating itself to the official release"
+    ],
     "3.6.10-beta1": [
       "[Fixed] Update Git for Windows to 2.56.0.windows.4 - #23075"
     ],
