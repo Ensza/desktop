@@ -88,6 +88,16 @@ class UpdateInfo extends React.Component<IUpdateInfoProps> {
  * running application such as name and version.
  */
 export class About extends React.Component<IAboutProps> {
+  /**
+   * Whether this build was compiled with an update feed (see
+   * `DESKTOP_E2E_UPDATES_URL` in `app/app-info.ts`). Forks of Desktop ship
+   * without one, in which case we hide the update related UI rather than
+   * showing it in a permanently unusable state.
+   */
+  private get hasUpdateFeed() {
+    return __UPDATES_URL__.length > 0
+  }
+
   private get canCheckForUpdates() {
     return (
       __RELEASE_CHANNEL__ !== 'development' ||
@@ -96,6 +106,10 @@ export class About extends React.Component<IAboutProps> {
   }
 
   private renderUpdateButton() {
+    if (!this.hasUpdateFeed) {
+      return null
+    }
+
     if (!this.canCheckForUpdates) {
       return null
     }
@@ -142,6 +156,11 @@ export class About extends React.Component<IAboutProps> {
   }
 
   private renderUpdateDetails() {
+    // Nothing to report about updates when this build doesn't have a feed.
+    if (!this.hasUpdateFeed) {
+      return null
+    }
+
     if (__LINUX__) {
       return null
     }
@@ -197,6 +216,12 @@ export class About extends React.Component<IAboutProps> {
   }
 
   private renderUpdateErrors() {
+    // Without an update feed we can never record a successful check, so this
+    // would only ever report a problem the user can't do anything about.
+    if (!this.hasUpdateFeed) {
+      return null
+    }
+
     if (__LINUX__) {
       return null
     }
@@ -231,6 +256,12 @@ export class About extends React.Component<IAboutProps> {
   }
 
   private renderBetaLink() {
+    // The beta channel is a GitHub Desktop release channel, it doesn't apply to
+    // builds which ship without an update feed.
+    if (!this.hasUpdateFeed) {
+      return
+    }
+
     if (__RELEASE_CHANNEL__ === 'beta') {
       return
     }
@@ -281,6 +312,10 @@ export class About extends React.Component<IAboutProps> {
               {versionText} ({this.props.applicationArchitecture})
             </span>{' '}
             ({releaseNotesLink})
+          </p>
+          <p className="no-padding unofficial-fork-notice">
+            Unofficial fork of GitHub Desktop. Not affiliated with, sponsored
+            by, or supported by GitHub, Inc.
           </p>
           {this.renderUpdateDetails()}
           {this.renderUpdateButton()}

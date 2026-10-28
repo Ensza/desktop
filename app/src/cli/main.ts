@@ -18,7 +18,10 @@ const run = (...args: Array<string>) => {
   if (process.platform === 'darwin') {
     execFile('open', ['-n', join(__dirname, '../../..'), '--args', ...args], cb)
   } else if (process.platform === 'win32') {
-    const exeName = `GitHubDesktop${__DEV__ ? '-dev' : ''}.exe`
+    // Keep this in sync with `getExecutableName()` in script/dist-info.ts, which
+    // derives the executable name from the product name.
+    const identifier = __APP_NAME__.replace(/[^A-Za-z0-9]/g, '')
+    const exeName = `${identifier}${__DEV__ ? '-dev' : ''}.exe`
     spawn(join(__dirname, `../../${exeName}`), args, {
       detached: true,
       stdio: 'ignore',

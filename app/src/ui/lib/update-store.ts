@@ -224,6 +224,12 @@ class UpdateStore {
   }
 
   private async getUpdatesUrl(skipGuidCheck: boolean) {
+    // Builds without an update feed (forks, or builds made with an empty
+    // DESKTOP_E2E_UPDATES_URL) have nothing to check for.
+    if (__UPDATES_URL__.length === 0) {
+      return null
+    }
+
     let url = null
 
     try {
@@ -271,8 +277,15 @@ class UpdateStore {
   }
 
   private async updatePriorityUpdateStatus() {
+    const updatesUrl = await this.getUpdatesUrl(false)
+
+    // No update feed, nothing to prioritise.
+    if (updatesUrl === null) {
+      return
+    }
+
     try {
-      const response = await fetch(await this.getUpdatesUrl(false), {
+      const response = await fetch(updatesUrl, {
         method: 'HEAD',
         headers: { 'user-agent': getUserAgent() },
       })

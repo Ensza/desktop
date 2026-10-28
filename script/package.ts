@@ -13,6 +13,7 @@ import {
   shouldMakeDelta,
   getUpdatesURL,
   isPublishable,
+  isOfficialBuild,
   getBundleSizes,
   getDistRoot,
   getDistArchitecture,
@@ -77,9 +78,11 @@ function packageWindows() {
     process.exit(1)
   }
 
+  // Fork specific splash screen: it identifies the build as an unofficial
+  // release instead of showing upstream's GitHub Desktop animation.
   const splashScreenPath = path.resolve(
     __dirname,
-    '../app/static/logos/win32-installer-splash.gif'
+    '../app/static/logos/win32-installer-splash-unofficial.gif'
   )
 
   if (!existsSync(splashScreenPath)) {
@@ -106,7 +109,9 @@ function packageWindows() {
     setupMsi: getWindowsInstallerName(),
   }
 
-  if (shouldMakeDelta()) {
+  // Delta packages are produced from GitHub's release feed, so only the
+  // official build may ask Squirrel to pull them.
+  if (shouldMakeDelta() && isOfficialBuild()) {
     const url = new URL(getUpdatesURL())
     // Make sure Squirrel.Windows isn't affected by partially or completely
     // disabled releases.

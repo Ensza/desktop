@@ -20,6 +20,14 @@ dialog#about {
       margin-bottom: 0;
     }
 
+    // This build is a fork of GitHub Desktop rather than an official release,
+    // make that explicit without competing with the version or the links.
+    p.unofficial-fork-notice {
+      color: var(--text-secondary-color);
+      font-size: var(--font-size-sm);
+      margin-top: var(--spacing);
+    }
+
     p.terms-and-license {
       // A11y: WCAG SC 2.58 states that "The size of the target for pointer
       // inputs is at least 24 by 24 CSS pixels, except, if target is in a

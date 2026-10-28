@@ -1,0 +1,33 @@
+GitHub Desktop (Unofficial)
+===========================
+
+This is an unofficial fork of GitHub Desktop, distributed by Ensza.
+
+Upstream project: https://github.com/desktop/desktop
+Fork source:      https://github.com/Ensza/desktop
+
+Attribution
+-----------
+
+The original work is Copyright (c) GitHub, Inc. and is licensed under the MIT
+License. See the LICENSE file in this repository for the full text; that notice
+is preserved unmodified as the MIT License requires.
+
+Modifications made in this fork are Copyright (c) Ensza and are released under
+the same MIT License.
+
+No affiliation
+--------------
+
+This build is not affiliated with, sponsored by, endorsed by, or supported by
+GitHub, Inc. "GitHub" and "GitHub Desktop" are trademarks of GitHub, Inc., used
+here only to describe the origin of this software. Bug reports and support
+requests for this fork must go to https://github.com/Ensza/desktop and not to
+GitHub Support.
+
+Updates
+-------
+
+This build does not use GitHub's update feed (doing so would replace it with the
+official GitHub Desktop). It ships without automatic updates unless a build is
+made with DESKTOP_E2E_UPDATES_URL pointing at a feed controlled by the fork.

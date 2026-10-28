@@ -1,5 +1,5 @@
 import { getSHA } from './git-info'
-import { getUpdatesURL, getChannel } from '../script/dist-info'
+import { getUpdatesURL, getChannel, isOfficialBuild } from '../script/dist-info'
 import { version, productName } from './package.json'
 
 const devClientId = '3a723b10ac5575cc5bb9'
@@ -28,7 +28,14 @@ export function getReplacements() {
     __DEV__: isDevBuild,
     __DEV_SECRETS__: isDevBuild || !process.env.DESKTOP_OAUTH_CLIENT_SECRET,
     __RELEASE_CHANNEL__: s(channel),
-    __UPDATES_URL__: s(process.env.DESKTOP_E2E_UPDATES_URL ?? getUpdatesURL()),
+    // Only the official build may talk to GitHub's update feed. Without this
+    // guard a fork would check for updates and promptly replace itself with
+    // the official GitHub Desktop. Forks can opt in to their own feed by
+    // setting DESKTOP_E2E_UPDATES_URL when building.
+    __UPDATES_URL__: s(
+      process.env.DESKTOP_E2E_UPDATES_URL ??
+        (isOfficialBuild() ? getUpdatesURL() : '')
+    ),
     __ERROR_REPORTING_ENDPOINT__: optionalStringReplacement(
       process.env.DESKTOP_ERROR_REPORTING_ENDPOINT
     ),

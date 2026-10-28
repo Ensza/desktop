@@ -2,10 +2,23 @@ import * as Path from 'path'
 import * as Fs from 'fs'
 
 import { getProductName, getVersion } from '../app/package-info'
+// The raw product name, without the `-dev` suffix, so identifiers which must be
+// shared between development and production builds stay stable.
+import { productName as packageProductName } from '../app/package.json'
 import { join } from 'path'
 
 const productName = getProductName()
 const version = getVersion()
+
+/**
+ * The product name without the release channel suffix.
+ *
+ * This is captured eagerly (rather than read from the imported module on
+ * demand) because `script/build.ts` rewrites `productName` on the very same
+ * `app/package.json` module object to the dev flavoured name while packaging,
+ * which would otherwise leak a `-dev` suffix into the identifiers below.
+ */
+const baseProductName: string = packageProductName
 
 const projectRoot = Path.join(__dirname, '..')
 
@@ -94,8 +107,18 @@ export function getWindowsDeltaNugetPackagePath() {
   )
 }
 
+/**
+ * The identifier used for Windows specific artifacts: the distributed
+ * executable name, the Squirrel package (which in turn decides the install
+ * directory in `%LOCALAPPDATA%`, the uninstaller entry and the App User Model
+ * ID, `com.squirrel.<identifier>.<identifier>`).
+ *
+ * It's derived from the product name so that forks end up with an identity of
+ * their own instead of sharing GitHub Desktop's, which would make the two
+ * installs overwrite each other.
+ */
 export function getWindowsIdentifierName() {
-  return 'GitHubDesktop'
+  return baseProductName.replace(/[^A-Za-z0-9]/g, '')
 }
 
 export function getBundleSizes() {
@@ -133,6 +156,18 @@ export function getDistArchitecture(): 'arm64' | 'x64' {
   // https://blogs.windows.com/windows-insider/2020/12/10/introducing-x64-emulation-in-preview-for-windows-10-on-arm-pcs-to-the-windows-insider-program/
 
   return 'x64'
+}
+
+/**
+ * Whether this build is the official GitHub Desktop build.
+ *
+ * Forks must never use GitHub's update feed or Squirrel's remote release feed:
+ * doing so would make them download and install the official app right over
+ * themselves. Forks that want updates should point `DESKTOP_E2E_UPDATES_URL`
+ * at a feed of their own.
+ */
+export function isOfficialBuild() {
+  return baseProductName === 'GitHub Desktop'
 }
 
 export function getUpdatesURL() {

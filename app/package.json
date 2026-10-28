@@ -1,20 +1,26 @@
 {
   "name": "desktop",
-  "productName": "GitHub Desktop",
-  "bundleID": "com.github.GitHubClient",
-  "companyName": "GitHub, Inc.",
+  "productName": "GitHub Desktop (Unofficial)",
+  "bundleID": "com.ensza.GitHubDesktopUnofficial",
+  "companyName": "Ensza (unofficial GitHub Desktop fork)",
   "version": "3.6.10-beta1",
   "main": "./main.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/desktop/desktop.git"
+    "url": "https://github.com/Ensza/desktop.git"
   },
-  "description": "Simple collaboration from your desktop",
+  "description": "Unofficial fork of GitHub Desktop by Ensza",
   "author": {
     "name": "GitHub, Inc.",
     "email": "opensource+desktop@github.com",
     "url": "https://desktop.github.com/"
   },
+  "contributors": [
+    {
+      "name": "Ensza",
+      "url": "https://github.com/Ensza"
+    }
+  ],
   "license": "MIT",
   "dependencies": {
     "@floating-ui/react-dom": "^2.1.2",

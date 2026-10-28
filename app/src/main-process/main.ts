@@ -121,7 +121,13 @@ if (__DARWIN__) {
 // On Windows, in order to get notifications properly working for dev builds,
 // we'll want to set the right App User Model ID from production builds.
 if (__WIN32__ && __DEV__) {
-  app.setAppUserModelId('com.squirrel.GitHubDesktop.GitHubDesktop')
+  // Squirrel derives the App User Model ID of installed apps from the package
+  // and executable name (`com.squirrel.<identifier>.<identifier>`), so we
+  // derive it from the product name here as well. Hard coding GitHub Desktop's
+  // identifier would make forks share notification and taskbar identity with
+  // the official app.
+  const identifier = __APP_NAME__.replace(/[^A-Za-z0-9]/g, '')
+  app.setAppUserModelId(`com.squirrel.${identifier}.${identifier}`)
 }
 
 app.on('window-all-closed', () => {
